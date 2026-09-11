@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Palm — Gesture Gallery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --bg: #f4efe6;          /* warm paper */
+    --bg-deep: #e9e2d3;
+    --ink: #1c1a17;         /* near black */
+    --muted: #8a8175;
+    --line: #d9d0bf;
+    --card: #fbf8f2;
+    --stage-bg: #12100e;
+    --on: #7fa07a;
+    --off: #c9776c;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: "Cormorant Garamond", Georgia, serif;
+    font-size: 19px;
+    line-height: 1.5;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 56px 24px 80px; }
+
+  header { text-align: center; margin-bottom: 40px; }
+  .kicker {
+    font-family: "Marcellus", serif;
+    letter-spacing: 0.42em; text-transform: uppercase;
+    font-size: 0.72rem; color: var(--muted); margin-bottom: 18px;
+  }
+  h1 {
+    font-family: "Marcellus", serif; font-weight: 400;
+    font-size: clamp(2.6rem, 7vw, 4.4rem);
+    letter-spacing: 0.02em; margin: 0 0 14px; line-height: 1;
+  }
+  .lede {
+    font-size: 1.15rem; font-style: italic; color: var(--muted);
+    max-width: 32em; margin: 0 auto;
+  }
+
+  /* Stage ---------------------------------------------------- */
+  .stage {
+    position: relative; width: 100%; aspect-ratio: 4 / 3;
+    background: var(--stage-bg); border: 1px solid var(--line);
+    overflow: hidden;
+  }
+  video, canvas.overlay { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transform: scaleX(-1); }
+  video { opacity: 0; transition: opacity .6s ease; }
+  video.live { opacity: 1; }
+
+  .stage-empty {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 14px;
+    color: #b9b1a2; text-align: center; padding: 24px;
+  }
+  .stage-empty .glyph { font-size: 2.4rem; }
+  .stage-empty p { margin: 0; font-style: italic; font-size: 1.05rem; }
+
+  /* Palm-following photo ------------------------------------- */
+  .palm-photo {
+    position: absolute; left: 0; top: 0; width: 200px;
+    transform: translate(-50%, -50%) scale(0);
+    transform-origin: center; pointer-events: none;
+    will-change: transform, left, top;
+    /* soft cast shadow only — follows the image's own alpha shape, no frame */
+    filter: drop-shadow(0 8px 22px rgba(0,0,0,.42));
+    visibility: hidden;
+  }
+  .palm-photo img {
+    width: 100%; height: auto; display: block;
+  }
+
+  .badge {
+    position: absolute; top: 16px; left: 16px;
+    display: flex; align-items: center; gap: 9px;
+    background: rgba(18,16,14,.55); color: #f4efe6;
+    backdrop-filter: blur(6px); padding: 7px 14px;
+    font-family: "Marcellus", serif; letter-spacing: 0.16em;
+    text-transform: uppercase; font-size: 0.66rem;
+  }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--off); transition: background .3s; }
+  .dot.on { background: var(--on); }
+
+  /* Controls ------------------------------------------------- */
+  .controls {
+    margin-top: 26px; display: flex; flex-wrap: wrap;
+    gap: 18px; justify-content: center; align-items: center;
+  }
+
+  /* toggle switch */
+  .switch {
+    display: inline-flex; align-items: center; gap: 14px;
+    background: none; border: none; cursor: pointer; padding: 6px;
+    font-family: "Marcellus", serif; font-size: 0.82rem;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink);
+  }
+  .switch:disabled { opacity: .45; cursor: default; }
+  .track {
+    position: relative; width: 58px; height: 30px; border-radius: 999px;
+    background: var(--bg-deep); border: 1px solid var(--line);
+    transition: background .25s, border-color .25s;
+    flex: none;
+  }
+  .knob {
+    position: absolute; top: 3px; left: 3px; width: 22px; height: 22px;
+    border-radius: 50%; background: var(--off);
+    transition: transform .25s cubic-bezier(.34,1.4,.64,1), background .25s;
+  }
+  .switch.on .track { background: var(--ink); border-color: var(--ink); }
+  .switch.on .knob { transform: translateX(28px); background: var(--on); }
+
+  .btn {
+    font-family: "Marcellus", serif; font-size: 0.82rem;
+    letter-spacing: 0.18em; text-transform: uppercase;
+    padding: 14px 26px; background: transparent; color: var(--ink);
+    border: 1px solid var(--ink); cursor: pointer;
+    transition: background .25s, color .25s;
+  }
+  .btn:hover { background: var(--ink); color: var(--bg); }
+  input[type="file"] { display: none; }
+
+  .notice {
+    margin-top: 20px; text-align: center; font-style: italic;
+    color: var(--muted); min-height: 1.4em;
+  }
+  .notice.error { color: #a24a3c; font-style: normal; }
+
+  /* Gallery ------------------------------------------------- */
+  .gallery-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    margin: 60px 0 20px; border-bottom: 1px solid var(--line); padding-bottom: 12px;
+  }
+  .gallery-head h2 {
+    font-family: "Marcellus", serif; font-weight: 400;
+    font-size: 1.5rem; margin: 0; letter-spacing: 0.04em;
+  }
+  .gallery-head span { color: var(--muted); font-style: italic; font-size: 0.95rem; }
+
+  .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 16px; }
+  .gallery:empty::after {
+    content: "No photographs yet — upload a few, then an open palm draws one at random.";
+    color: var(--muted); font-style: italic; grid-column: 1 / -1;
+    padding: 28px 0; text-align: center;
+  }
+  .tile {
+    position: relative; aspect-ratio: 1 / 1; background: var(--card);
+    border: 1px solid var(--line); overflow: hidden; cursor: pointer;
+    transition: border-color .2s;
+  }
+  .tile img { width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .4s ease; }
+  .tile:hover img { transform: scale(1.04); }
+  .tile.selected { border-color: var(--ink); }
+  .tile.selected::after {
+    content: "Selected"; position: absolute; left: 0; right: 0; bottom: 0;
+    background: var(--ink); color: var(--bg); font-family: "Marcellus", serif;
+    font-size: 0.6rem; letter-spacing: 0.22em; text-transform: uppercase;
+    text-align: center; padding: 6px 0;
+  }
+  .tile .remove {
+    position: absolute; top: 6px; right: 6px; width: 24px; height: 24px;
+    background: rgba(18,16,14,.6); color: #fff; border: none; cursor: pointer;
+    font-size: 13px; line-height: 24px; opacity: 0; transition: opacity .2s;
+  }
+  .tile:hover .remove { opacity: 1; }
+
+  footer {
+    margin-top: 72px; text-align: center; font-size: 0.82rem;
+    letter-spacing: 0.24em; text-transform: uppercase;
+    font-family: "Marcellus", serif; color: var(--muted);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="kicker">Gesture Gallery</div>
+    <h1>Palm</h1>
+    <p class="lede">Turn on the camera, curate your photographs, and open your palm to the lens — a picture springs onto your hand and follows it.</p>
+  </header>
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted></video>
+    <canvas class="overlay" id="overlay"></canvas>
+    <div class="palm-photo" id="palmPhoto"><img id="palmImg" alt="" /></div>
+    <div class="stage-empty" id="stageEmpty">
+      <span class="glyph">✦</span>
+      <p>The camera is off</p>
+    </div>
+    <div class="badge"><span class="dot" id="dot"></span><span id="badgeText">Camera Off</span></div>
+  </div>
+
+  <div class="controls">
+    <button class="switch" id="camToggle" role="switch" aria-checked="false">
+      <span class="track"><span class="knob"></span></span>
+      <span id="switchLabel">Camera Off</span>
+    </button>
+    <button class="btn" id="uploadBtn">Upload Photos</button>
+    <input type="file" id="fileInput" accept="image/*" multiple />
+  </div>
+  <div class="notice" id="notice">Flip the switch to grant camera access.</div>
+
+  <div class="gallery-head">
+    <h2>Your Collection</h2>
+    <span id="count">0 photographs</span>
+  </div>
+  <div class="gallery" id="gallery"></div>
+
+  <footer>Show your palm ✋</footer>
+</div>
+
+<script type="module">
+import { FilesetResolver, HandLandmarker }
+  from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+import { animate, motionValue }
+  from "https://cdn.jsdelivr.net/npm/motion@11.13.1/+esm";
+
+const video      = document.getElementById("video");
+const overlay    = document.getElementById("overlay");
+const octx       = overlay.getContext("2d");
+const stageEl    = document.getElementById("stage");
+const palmPhoto  = document.getElementById("palmPhoto");
+const palmImg    = document.getElementById("palmImg");
+const stageEmpty = document.getElementById("stageEmpty");
+const dot        = document.getElementById("dot");
+const badgeText  = document.getElementById("badgeText");
+const notice     = document.getElementById("notice");
+const camToggle  = document.getElementById("camToggle");
+const switchLabel = document.getElementById("switchLabel");
+const uploadBtn  = document.getElementById("uploadBtn");
+const fileInput  = document.getElementById("fileInput");
+const gallery    = document.getElementById("gallery");
+const countEl    = document.getElementById("count");
+
+/* ---------- Photo collection -------------------------------- */
+// Every uploaded photo is part of the pool; each detected palm is
+// assigned one at random (duplicates across hands are fine).
+let photos = [];
+
+uploadBtn.addEventListener("click", () => fileInput.click());
+fileInput.addEventListener("change", (e) => {
+  for (const file of e.target.files) {
+    if (!file.type.startsWith("image/")) continue;
+    photos.push({ id: crypto.randomUUID(), url: URL.createObjectURL(file) });
+  }
+  fileInput.value = "";
+  renderGallery();
+});
+
+function renderGallery() {
+  gallery.innerHTML = "";
+  for (const p of photos) {
+    const tile = document.createElement("div");
+    tile.className = "tile";
+    tile.innerHTML = `<img src="${p.url}" alt="" /><button class="remove" title="Remove">✕</button>`;
+    tile.querySelector(".remove").addEventListener("click", () => {
+      photos = photos.filter(x => x.id !== p.id);
+      URL.revokeObjectURL(p.url);
+      if (hand.photoId === p.id) assignPhoto();   // was on the hand → swap or clear
+      renderGallery();
+    });
+    gallery.appendChild(tile);
+  }
+  const n = photos.length;
+  countEl.textContent = n + (n === 1 ? " photograph" : " photographs");
+}
+
+function randomPhotoId() {
+  return photos.length ? photos[(Math.random() * photos.length) | 0].id : null;
+}
+
+/* ---------- Camera on/off ---------------------------------- */
+let handLandmarker = null;
+let modelLoading = null;
+let stream = null;
+let cameraOn = false;
+let busy = false;
+
+let rafDetect = 0;
+let lastDetect = 0;
+
+/* ============================================================
+   MOTION TUNING — how the photo springs onto the hand and moves.
+   All spring physics:  stiffness / damping / mass.
+
+     stiffness ↑  → faster / more urgent
+     damping   ↓  → bouncier / more overshoot   (↑ = calmer, no wobble)
+     mass      ↑  → heavier, more lag
+
+   • popIn / popOut  → one-shot `motion` animate() on the scale value.
+   • followPos / followSize → a *persistent* spring (one per axis) that
+     is never restarted; only its target moves, each detection. This is
+     what keeps the follow smooth and the size tracking alive — restarting
+     animate() every frame froze both (the value never left its start).
+   ============================================================ */
+const MOTION = {
+  // 出現「ぽんっ」— underdamped: overshoots ~14% past full size, then settles
+  popIn:      { type: "spring", stiffness: 800, damping: 26, mass: 0.75 },
+
+  // 消滅 — stiff & near-critical: collapses straight to 0, fast, no swell
+  popOut:     { type: "spring", stiffness: 900, damping: 42, mass: 0.5 },
+
+  // 手への追従（位置）— near-critical: catches up in ~130ms, no wobble
+  followPos:  { stiffness: 1100, damping: 52, mass: 1 },
+
+  // 手の大きさに応じたサイズ変化 — a touch softer, ~180ms, no wobble
+  followSize: { stiffness: 700, damping: 44, mass: 1 },
+
+  // --- hand detection (not animation, but drives perceived latency) ---
+  DETECT_INTERVAL_MS: 24,   // how often the hand is located (~40×/sec). Lower = snappier, heavier.
+  MISS_TOLERANCE:      2,   // missed detections absorbed before the photo pops out (anti-flicker).
+};
+
+/* A single hand is tracked (numHands: 1). One photo element, one set of
+   motion values — so two photos can never be on screen at once, the bug
+   the old multi-hand tracking had. */
+const hand = {
+  tgt: { x: 0.5, y: 0.5, w: 0.15 },   // latest palm position — the spring TARGET (normalized, mirrored)
+  visible: false,                     // is a palm currently being shown
+  miss: 0,                            // consecutive detections with no open palm
+  photoId: null,
+};
+
+// One persistent spring per followed axis. `pos` chases `hand.tgt`, carrying
+// its own velocity frame to frame — never re-created, only re-aimed.
+const spring = {
+  x: { pos: 0.5,  vel: 0 },
+  y: { pos: 0.5,  vel: 0 },
+  w: { pos: 0.15, vel: 0 },
+};
+function stepSpring(s, target, cfg, dt) {
+  // symplectic Euler, substepped so it stays stable if a frame runs long
+  const steps = dt > 0.018 ? Math.ceil(dt / 0.012) : 1;
+  const h = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    const force = -cfg.stiffness * (s.pos - target) - cfg.damping * s.vel;
+    s.vel += (force / cfg.mass) * h;
+    s.pos += s.vel * h;
+  }
+}
+
+// pop-in / pop-out only — a real `motion` animate() on one scale value
+const mvScale = motionValue(0);   // 0 = gone, 1 = full, >1 mid-overshoot
+
+let stageRect = null;
+function measureStage() { stageRect = stageEl.getBoundingClientRect(); }
+
+function applyPhotoStyles() {
+  if (!stageRect) return;
+  const s = Math.max(0, mvScale.get());
+  palmPhoto.style.left  = (spring.x.pos * stageRect.width)  + "px";
+  palmPhoto.style.top   = (spring.y.pos * stageRect.height) + "px";
+  palmPhoto.style.width = (spring.w.pos * stageRect.width)  + "px";
+  palmPhoto.style.transform  = `translate(-50%, -50%) scale(${s})`;
+  palmPhoto.style.visibility = s > 0.001 ? "visible" : "hidden";
+}
+
+// the single render loop: advance the follow springs toward hand.tgt, draw
+let followRAF = 0, followLast = 0;
+function followLoop(now) {
+  const dt = followLast ? Math.min(0.05, (now - followLast) / 1000) : 1 / 60;
+  followLast = now;
+
+  stepSpring(spring.x, hand.tgt.x, MOTION.followPos,  dt);
+  stepSpring(spring.y, hand.tgt.y, MOTION.followPos,  dt);
+  stepSpring(spring.w, hand.tgt.w, MOTION.followSize, dt);
+  applyPhotoStyles();
+
+  // keep ticking while the camera is on, or until the pop-out finishes
+  if (cameraOn || mvScale.get() > 0.001) {
+    followRAF = requestAnimationFrame(followLoop);
+  } else {
+    followRAF = 0; followLast = 0;
+  }
+}
+function startFollowLoop() {
+  if (!followRAF) { followLast = 0; followRAF = requestAnimationFrame(followLoop); }
+}
+
+window.addEventListener("resize", () => { measureStage(); applyPhotoStyles(); });
+
+// choose (or re-choose) which photo rides the hand
+function assignPhoto() {
+  hand.photoId = randomPhotoId();
+  const p = photos.find(x => x.id === hand.photoId);
+  if (p) {
+    palmImg.src = p.url;
+  } else {
+    // pool ran empty while a photo was on the hand → pop it out
+    palmImg.removeAttribute("src");
+    hand.visible = false;
+    animate(mvScale, 0, MOTION.popOut);
+  }
+}
+
+camToggle.addEventListener("click", () => {
+  if (busy) return;
+  cameraOn ? stopCamera() : startCamera();
+});
+
+function setSwitch(on) {
+  camToggle.classList.toggle("on", on);
+  camToggle.setAttribute("aria-checked", String(on));
+  switchLabel.textContent = on ? "Camera On" : "Camera Off";
+  badgeText.textContent = on ? "Searching for a hand" : "Camera Off";
+}
+
+async function ensureModel() {
+  if (handLandmarker) return handLandmarker;
+  if (!modelLoading) {
+    modelLoading = (async () => {
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+      );
+      return HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath:
+            "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+          delegate: "GPU",
+        },
+        runningMode: "VIDEO",
+        numHands: 1,                 // single hand → lightest, and no ID-swap bugs
+      });
+    })();
+  }
+  handLandmarker = await modelLoading;
+  return handLandmarker;
+}
+
+async function startCamera() {
+  busy = true;
+  notice.className = "notice";
+  notice.textContent = "Loading the hand-tracking model…";
+  camToggle.disabled = true;
+
+  try {
+    await ensureModel();
+  } catch (err) {
+    notice.className = "notice error";
+    notice.textContent = "Could not load the hand-tracking model: " + err.message;
+    modelLoading = null;
+    camToggle.disabled = false; busy = false;
+    return;
+  }
+
+  notice.textContent = "Requesting camera access…";
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 960 } },
+    });
+  } catch (err) {
+    if (err.name === "NotAllowedError" || err.name === "SecurityError") {
+      notice.className = "notice error";
+      notice.textContent = "Camera access is not permitted. You can change this in your browser settings.";
+    } else {
+      notice.className = "notice error";
+      notice.textContent = "Camera unavailable: " + err.message;
+    }
+    camToggle.disabled = false; busy = false;
+    return;
+  }
+
+  video.srcObject = stream;
+  await video.play();
+  overlay.width  = video.videoWidth;
+  overlay.height = video.videoHeight;
+
+  cameraOn = true;
+  video.classList.add("live");
+  stageEmpty.style.display = "none";
+  setSwitch(true);
+  notice.className = "notice";
+  notice.textContent = "Open your palm toward the camera to reveal a photograph.";
+
+  measureStage();
+  lastDetect = 0;
+  if (!rafDetect) rafDetect = requestAnimationFrame(detectTick);
+  startFollowLoop();
+  camToggle.disabled = false; busy = false;
+}
+
+function stopCamera() {
+  cameraOn = false;
+  hand.visible = false;
+  hand.miss = 0;
+  setSwitch(false);
+
+  animate(mvScale, 0, MOTION.popOut);   // photo springs away
+  cancelAnimationFrame(rafDetect); rafDetect = 0;
+
+  // release the camera immediately (in-use lamp turns off)
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+  video.srcObject = null;
+  video.classList.remove("live");
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+  stageEmpty.style.display = "flex";
+  dot.classList.remove("on");
+
+  notice.className = "notice";
+  notice.textContent = "Camera released. Flip the switch to start again.";
+}
+
+/* ---------- Detection (throttled) ------------------------- */
+function palmCenter(lm) {
+  const ids = [0, 5, 9, 13, 17];
+  let x = 0, y = 0;
+  for (const i of ids) { x += lm[i].x; y += lm[i].y; }
+  return { x: x / ids.length, y: y / ids.length };
+}
+// palm width, normalized to frame width — measured from the hand itself:
+// the knuckle span (index MCP → pinky MCP), cross-checked against
+// wrist → middle-finger MCP so a slightly tilted hand still reads sensibly.
+function palmWidth(lm) {
+  const knuckles = Math.hypot(lm[5].x - lm[17].x, lm[5].y - lm[17].y);
+  const lengthwise = Math.hypot(lm[0].x - lm[9].x, lm[0].y - lm[9].y);
+  return Math.max(knuckles, lengthwise * 0.78);
+}
+function isOpenPalm(lm) {
+  const wrist = lm[0];
+  const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, (a.z||0) - (b.z||0));
+  let extended = 0;
+  for (const [tip, pip] of [[8,6],[12,10],[16,14],[20,18]]) {
+    if (d(lm[tip], wrist) > d(lm[pip], wrist) * 1.05) extended++;
+  }
+  const thumbOpen = d(lm[4], wrist) > d(lm[3], wrist) * 1.02;
+  return extended === 4 && thumbOpen;
+}
+
+function detectTick(now) {
+  if (!cameraOn) return;
+  rafDetect = requestAnimationFrame(detectTick);
+  if (now - lastDetect < MOTION.DETECT_INTERVAL_MS) return;
+  lastDetect = now;
+  if (video.readyState < 2) return;
+
+  const res = handLandmarker.detectForVideo(video, now);
+  const lm = res.landmarks && res.landmarks[0];
+
+  octx.clearRect(0, 0, overlay.width, overlay.height);
+
+  const open = lm ? isOpenPalm(lm) : false;
+
+  if (lm) {
+    octx.fillStyle = "rgba(244,239,230,0.85)";
+    for (const p of lm) {
+      octx.beginPath();
+      octx.arc(p.x * overlay.width, p.y * overlay.height, 3, 0, Math.PI * 2);
+      octx.fill();
+    }
+  }
+
+  if (open && photos.length) {
+    const c = palmCenter(lm);
+    const tx = 1 - c.x;                                     // mirror to match preview
+    const ty = c.y;
+    const tw = Math.min(0.46, Math.max(0.05, palmWidth(lm) * 0.95));
+
+    if (!hand.visible) {
+      // palm just (re)appeared — snap the follow springs onto the hand
+      // (no slide-in from the last position), reset their velocity,
+      // then spring the photo in.
+      spring.x.pos = tx; spring.x.vel = 0;
+      spring.y.pos = ty; spring.y.vel = 0;
+      spring.w.pos = tw; spring.w.vel = 0;
+      assignPhoto();                     // fresh random photo for this appearance
+      animate(mvScale, 1, MOTION.popIn); // ← 「ぽんっ」
+      hand.visible = true;
+    }
+    // Every frame just move the TARGET — the persistent springs in
+    // followLoop() chase it, keeping their velocity. No animate() here.
+    hand.tgt.x = tx; hand.tgt.y = ty; hand.tgt.w = tw;
+    hand.miss = 0;
+  } else {
+    // palm lost / closed / no hand — tolerate a few dropped frames, then pop out
+    if (hand.visible && ++hand.miss > MOTION.MISS_TOLERANCE) {
+      hand.visible = false;
+      animate(mvScale, 0, MOTION.popOut);
+    }
+  }
+
+  dot.classList.toggle("on", open);
+  badgeText.textContent =
+    !open            ? "Searching for a hand"
+    : !photos.length ? "Upload a photo"
+    : "Palm detected";
+}
+
+renderGallery();
+measureStage();
+window.addEventListener("beforeunload", () => {
+  for (const p of photos) URL.revokeObjectURL(p.url);
+});
+</script>
+</body>
+</html>
