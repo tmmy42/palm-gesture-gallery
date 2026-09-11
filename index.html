@@ -67,11 +67,15 @@
   .stage-empty p { margin: 0; font-style: italic; font-size: 1.05rem; }
 
   /* Palm-following photo ------------------------------------- */
+  /* Position, follow-size and pop scale are ALL driven by one `transform`
+     written per frame (see applyPhotoStyles) — never left/top/width, which
+     are layout properties and would force a reflow on every animation
+     frame. `width` here is only the base size, set once per resize. */
   .palm-photo {
     position: absolute; left: 0; top: 0; width: 200px;
-    transform: translate(-50%, -50%) scale(0);
+    transform: translate(0, 0) scale(0);
     transform-origin: center; pointer-events: none;
-    will-change: transform, left, top;
+    will-change: transform;
     /* soft cast shadow only — follows the image's own alpha shape, no frame */
     filter: drop-shadow(0 8px 22px rgba(0,0,0,.42));
     visibility: hidden;
@@ -246,14 +250,40 @@ const countEl    = document.getElementById("count");
 // assigned one at random (duplicates across hands are fine).
 let photos = [];
 
+// A phone photo can be 12MP+ / several MB. Used as-is, the browser has to
+// decode that full bitmap and re-rasterize it every time the palm-follow
+// animation resizes it (worse still, on every appearance if the decoded
+// bitmap gets evicted from cache). Downscale once on upload — 1000px is
+// far more than the photo is ever displayed at — so both the gallery
+// thumbnail and the palm photo stay cheap to decode and to composite.
+async function downscaleToBlob(file, maxDim = 1000, quality = 0.85) {
+  const bitmap = await createImageBitmap(file);
+  const scale = Math.min(1, maxDim / Math.max(bitmap.width, bitmap.height));
+  const w = Math.round(bitmap.width * scale), h = Math.round(bitmap.height * scale);
+  const canvas = "OffscreenCanvas" in window
+    ? new OffscreenCanvas(w, h)
+    : Object.assign(document.createElement("canvas"), { width: w, height: h });
+  canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+  bitmap.close?.();
+  return canvas.convertToBlob
+    ? canvas.convertToBlob({ type: "image/jpeg", quality })
+    : new Promise((res) => canvas.toBlob(res, "image/jpeg", quality));
+}
+
 uploadBtn.addEventListener("click", () => fileInput.click());
-fileInput.addEventListener("change", (e) => {
-  for (const file of e.target.files) {
-    if (!file.type.startsWith("image/")) continue;
-    photos.push({ id: crypto.randomUUID(), url: URL.createObjectURL(file) });
-  }
+fileInput.addEventListener("change", async (e) => {
+  const files = [...e.target.files].filter((f) => f.type.startsWith("image/"));
   fileInput.value = "";
-  renderGallery();
+  for (const file of files) {
+    let url;
+    try {
+      url = URL.createObjectURL(await downscaleToBlob(file));
+    } catch {
+      url = URL.createObjectURL(file);   // decode failed (e.g. unsupported format) — fall back to the original
+    }
+    photos.push({ id: crypto.randomUUID(), url });
+    renderGallery();   // progressive — don't make the user wait for the whole batch
+  }
 });
 
 function renderGallery() {
@@ -261,7 +291,7 @@ function renderGallery() {
   for (const p of photos) {
     const tile = document.createElement("div");
     tile.className = "tile";
-    tile.innerHTML = `<img src="${p.url}" alt="" /><button class="remove" title="Remove">✕</button>`;
+    tile.innerHTML = `<img src="${p.url}" alt="" loading="lazy" decoding="async" /><button class="remove" title="Remove">✕</button>`;
     tile.querySelector(".remove").addEventListener("click", () => {
       photos = photos.filter(x => x.id !== p.id);
       URL.revokeObjectURL(p.url);
@@ -315,10 +345,20 @@ const MOTION = {
   // 手の大きさに応じたサイズ変化 — a touch softer, ~180ms, no wobble
   followSize: { stiffness: 700, damping: 44, mass: 1 },
 
-  // --- hand detection (not animation, but drives perceived latency) ---
-  DETECT_INTERVAL_MS: 24,   // how often the hand is located (~40×/sec). Lower = snappier, heavier.
-  MISS_TOLERANCE:      2,   // missed detections absorbed before the photo pops out (anti-flicker).
+  // --- hand detection (not animation, but drives perceived latency AND
+  //     main-thread load — MediaPipe's detectForVideo() runs synchronously
+  //     on the main thread, so this is the #1 performance knob) ---
+  DETECT_INTERVAL_MS: 100,  // how often the hand is located (~10×/sec).
+  MISS_TOLERANCE:      1,   // missed detections absorbed before the photo pops out (anti-flicker).
 };
+// Detection can run this slowly without the *motion* looking choppy,
+// because followLoop's spring runs every rAF frame regardless — it just
+// smoothly chases whatever target detectTick last wrote to hand.tgt.
+
+// Photo's max on-screen width, as a fraction of the stage width — also the
+// element's fixed base size, so per-frame size changes are a transform
+// scale() relative to this, never a `width` (layout) write.
+const PHOTO_MAX_W_NORM = 0.46;
 
 /* A single hand is tracked (numHands: 1). One photo element, one set of
    motion values — so two photos can never be on screen at once, the bug
@@ -352,15 +392,23 @@ function stepSpring(s, target, cfg, dt) {
 const mvScale = motionValue(0);   // 0 = gone, 1 = full, >1 mid-overshoot
 
 let stageRect = null;
-function measureStage() { stageRect = stageEl.getBoundingClientRect(); }
+function measureStage() {
+  stageRect = stageEl.getBoundingClientRect();
+  // Base size set ONCE here (and on resize) — never per frame. Everything
+  // between resizes is a pure `transform`, so the browser only recomposites
+  // (GPU), it never re-lays-out or repaints this element.
+  palmPhoto.style.width = (PHOTO_MAX_W_NORM * stageRect.width) + "px";
+}
 
 function applyPhotoStyles() {
   if (!stageRect) return;
   const s = Math.max(0, mvScale.get());
-  palmPhoto.style.left  = (spring.x.pos * stageRect.width)  + "px";
-  palmPhoto.style.top   = (spring.y.pos * stageRect.height) + "px";
-  palmPhoto.style.width = (spring.w.pos * stageRect.width)  + "px";
-  palmPhoto.style.transform  = `translate(-50%, -50%) scale(${s})`;
+  const tx = spring.x.pos * stageRect.width;
+  const ty = spring.y.pos * stageRect.height;
+  const sizeScale = spring.w.pos / PHOTO_MAX_W_NORM;   // relative to the fixed base width
+  // translate() first (in px, from top-left), then center + scale — a
+  // single compositor-only write standing in for the old left/top/width.
+  palmPhoto.style.transform = `translate(${tx}px, ${ty}px) translate(-50%, -50%) scale(${sizeScale * s})`;
   palmPhoto.style.visibility = s > 0.001 ? "visible" : "hidden";
 }
 
@@ -455,7 +503,10 @@ async function startCamera() {
   notice.textContent = "Requesting camera access…";
   try {
     stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 960 } },
+      // 640×480 is plenty for MediaPipe's hand landmarker (it downsamples
+      // internally anyway) and meaningfully cuts video-decode + inference +
+      // overlay-canvas cost per frame vs. the previous 1280×960 request.
+      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
     });
   } catch (err) {
     if (err.name === "NotAllowedError" || err.name === "SecurityError") {
@@ -562,7 +613,7 @@ function detectTick(now) {
     const c = palmCenter(lm);
     const tx = 1 - c.x;                                     // mirror to match preview
     const ty = c.y;
-    const tw = Math.min(0.46, Math.max(0.05, palmWidth(lm) * 0.95));
+    const tw = Math.min(PHOTO_MAX_W_NORM, Math.max(0.05, palmWidth(lm) * 0.95));
 
     if (!hand.visible) {
       // palm just (re)appeared — snap the follow springs onto the hand
