@@ -263,11 +263,30 @@ async function downscaleToBlob(file, maxDim = 1000, quality = 0.85) {
   const canvas = "OffscreenCanvas" in window
     ? new OffscreenCanvas(w, h)
     : Object.assign(document.createElement("canvas"), { width: w, height: h });
-  canvas.getContext("2d").drawImage(bitmap, 0, 0, w, h);
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close?.();
+
+  // JPEG has no alpha channel — always encoding to it silently flattened
+  // transparent pixels onto black (the canvas's default backdrop when a
+  // format with no alpha is requested). JPEG source files can never have
+  // real transparency, so only bother checking pixels for anything else
+  // (PNG, WebP, GIF, ...); if any pixel isn't fully opaque, keep PNG so
+  // the alpha survives all the way to the palm-follow display.
+  const canBeOpaque = file.type === "image/jpeg" || file.type === "image/jpg";
+  const type = (!canBeOpaque && canvasHasTransparency(ctx, w, h)) ? "image/png" : "image/jpeg";
+
   return canvas.convertToBlob
-    ? canvas.convertToBlob({ type: "image/jpeg", quality })
-    : new Promise((res) => canvas.toBlob(res, "image/jpeg", quality));
+    ? canvas.convertToBlob({ type, quality })
+    : new Promise((res) => canvas.toBlob(res, type, quality));
+}
+
+function canvasHasTransparency(ctx, w, h) {
+  const { data } = ctx.getImageData(0, 0, w, h);
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] !== 255) return true;
+  }
+  return false;
 }
 
 uploadBtn.addEventListener("click", () => fileInput.click());
