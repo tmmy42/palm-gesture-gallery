@@ -6,7 +6,7 @@
 <title>Palm — Gesture Gallery</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Playfair+Display:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Marcellus&family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;1,400&display=swap" rel="stylesheet" />
 <style>
   :root {
     --bg: #f4efe6;          /* warm paper */
@@ -319,6 +319,24 @@ let rafDetect = 0;
 let lastDetect = 0;
 
 /* ============================================================
+   MOBILE PROFILE — phones/tablets get a lighter camera stream and a
+   slower detection cadence than desktop. Detected via pointer type
+   (touch-primary, no hover), not user-agent sniffing, so it also
+   catches tablets that don't self-identify as "mobile".
+
+   Mobile networks + weaker CPUs/GPUs make BOTH ends of this app's main
+   cost worse than on desktop: MediaPipe's detectForVideo() runs
+   synchronously on the main thread and is noticeably slower per call on
+   phone-class hardware, and camera drivers are more likely to hand back
+   more than what's asked for unless a `max` is given, not just `ideal`.
+   ============================================================ */
+const isMobile = matchMedia("(pointer: coarse)").matches;
+
+const CAMERA_CONSTRAINTS = isMobile
+  ? { width: { ideal: 480, max: 640 }, height: { ideal: 360, max: 480 }, frameRate: { ideal: 24, max: 30 } }
+  : { width: { ideal: 640, max: 960 }, height: { ideal: 480, max: 720 }, frameRate: { ideal: 30 } };
+
+/* ============================================================
    MOTION TUNING — how the photo springs onto the hand and moves.
    All spring physics:  stiffness / damping / mass.
 
@@ -348,7 +366,7 @@ const MOTION = {
   // --- hand detection (not animation, but drives perceived latency AND
   //     main-thread load — MediaPipe's detectForVideo() runs synchronously
   //     on the main thread, so this is the #1 performance knob) ---
-  DETECT_INTERVAL_MS: 100,  // how often the hand is located (~10×/sec).
+  DETECT_INTERVAL_MS: isMobile ? 150 : 100,  // phones: ~6.7×/sec, desktop: ~10×/sec.
   MISS_TOLERANCE:      1,   // missed detections absorbed before the photo pops out (anti-flicker).
 };
 // Detection can run this slowly without the *motion* looking choppy,
@@ -486,29 +504,28 @@ async function ensureModel() {
 
 async function startCamera() {
   busy = true;
-  notice.className = "notice";
-  notice.textContent = "Loading the hand-tracking model…";
   camToggle.disabled = true;
-
-  try {
-    await ensureModel();
-  } catch (err) {
-    notice.className = "notice error";
-    notice.textContent = "Could not load the hand-tracking model: " + err.message;
-    modelLoading = null;
-    camToggle.disabled = false; busy = false;
-    return;
-  }
-
+  notice.className = "notice";
   notice.textContent = "Requesting camera access…";
+
+  // getUserMedia fires FIRST, in the same click — the ~8MB model load
+  // happens in parallel, not before. Two reasons this order matters,
+  // especially on mobile:
+  //  1. Awaiting the model first was adding real seconds (WASM download +
+  //     compile, plus the model file itself) before the permission prompt
+  //     even appeared — the reported "prompt takes forever" symptom.
+  //  2. iOS Safari can silently stall or drop getUserMedia if too much
+  //     async work happens before the call "spends" the user gesture.
+  const modelPromise = ensureModel();
+
+  let newStream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({
-      // 640×480 is plenty for MediaPipe's hand landmarker (it downsamples
-      // internally anyway) and meaningfully cuts video-decode + inference +
-      // overlay-canvas cost per frame vs. the previous 1280×960 request.
-      video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
+    newStream = await navigator.mediaDevices.getUserMedia({
+      facingMode: "user",
+      ...CAMERA_CONSTRAINTS,   // resolution/frame-rate caps — see MOBILE PROFILE above
     });
   } catch (err) {
+    modelPromise.catch(() => {});   // swallow: avoid an unhandled rejection if this also fails
     if (err.name === "NotAllowedError" || err.name === "SecurityError") {
       notice.className = "notice error";
       notice.textContent = "Camera access is not permitted. You can change this in your browser settings.";
@@ -520,23 +537,40 @@ async function startCamera() {
     return;
   }
 
+  stream = newStream;
   video.srcObject = stream;
   await video.play();
   overlay.width  = video.videoWidth;
   overlay.height = video.videoHeight;
 
+  // The preview is live now, independent of whether the model is ready —
+  // the user isn't staring at a blank box while an 8MB model downloads.
   cameraOn = true;
   video.classList.add("live");
   stageEmpty.style.display = "none";
   setSwitch(true);
-  notice.className = "notice";
-  notice.textContent = "Open your palm toward the camera to reveal a photograph.";
-
   measureStage();
-  lastDetect = 0;
-  if (!rafDetect) rafDetect = requestAnimationFrame(detectTick);
   startFollowLoop();
   camToggle.disabled = false; busy = false;
+
+  notice.className = "notice";
+  notice.textContent = "Loading the hand-tracking model…";
+  try {
+    await modelPromise;
+  } catch (err) {
+    modelLoading = null;
+    if (cameraOn) {   // could have been switched off already while this loaded
+      notice.className = "notice error";
+      notice.textContent = "Could not load the hand-tracking model: " + err.message;
+    }
+    return;   // camera stays on (the preview is still useful); no detection loop
+  }
+  if (!cameraOn) return;   // toggled off again while the model was loading
+
+  notice.className = "notice";
+  notice.textContent = "Open your palm toward the camera to reveal a photograph.";
+  lastDetect = 0;
+  if (!rafDetect) rafDetect = requestAnimationFrame(detectTick);
 }
 
 function stopCamera() {
