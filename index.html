@@ -521,8 +521,10 @@ async function startCamera() {
   let newStream;
   try {
     newStream = await navigator.mediaDevices.getUserMedia({
-      facingMode: "user",
-      ...CAMERA_CONSTRAINTS,   // resolution/frame-rate caps — see MOBILE PROFILE above
+      video: {
+        facingMode: "user",
+        ...CAMERA_CONSTRAINTS,   // resolution/frame-rate caps — see MOBILE PROFILE above
+      },
     });
   } catch (err) {
     modelPromise.catch(() => {});   // swallow: avoid an unhandled rejection if this also fails
